@@ -1,92 +1,121 @@
-const MODEL = process.env.ANALYZE_MODEL || "claude-sonnet-5";
+const MODEL = process.env.ANALYZE_MODEL || "openai/gpt-oss-20b";
 
 export async function POST(req) {
   try {
-    const apiKey = process.env.ANTHROPIC_API_KEY;
+    const apiKey = process.env.GROQ_API_KEY;
+
     if (!apiKey) {
       return json(
         {
           error:
-            "Aucune clé ANTHROPIC_API_KEY n'est configurée sur ce déploiement. Ajoute-la dans Vercel → Project Settings → Environment Variables, puis redéploie.",
+            "Aucune clé GROQ_API_KEY n'est configurée. Ajoute-la dans Vercel → Settings → Environment Variables.",
         },
         500
       );
     }
 
     const { business, product } = await req.json();
+
     if (!business || !business.name) {
       return json({ error: "Commerce invalide." }, 400);
     }
-    const productLabel = (product || "").trim() || "un service pour commerces locaux";
+
+    const productLabel =
+      (product || "").trim() || "un service pour commerces locaux";
 
     const facts = [
       `Nom : ${business.name}`,
-      `Catégorie (OpenStreetMap) : ${business.category || "inconnue"}`,
-      `Distance du point de recherche : ${business.distanceKm?.toFixed(1)} km`,
-      `Site web déclaré : ${business.hasWebsite ? business.website || "oui (url non précisée)" : "aucun site web trouvé"}`,
-      `Horaires connus : ${business.openingHours || "non renseignés"}`,
-      `Téléphone connu : ${business.phone || "non renseigné"}`,
+      `Catégorie : ${business.category || "inconnue"}`,
+      `Distance : ${business.distanceKm?.toFixed(1) || "inconnue"} km`,
+      `Site web : ${
+        business.hasWebsite
+          ? business.website || "oui"
+          : "aucun site web trouvé"
+      }`,
+      `Horaires : ${business.openingHours || "non renseignés"}`,
+      `Téléphone : ${business.phone || "non renseigné"}`,
       `Adresse : ${business.address || "non précisée"}`,
     ].join("\n");
 
-    const systemPrompt = `Tu es un consultant en prospection commerciale B2B pour indépendants et petites agences (ex. création de sites web, référencement, marketing local).
-On te donne les infos publiques et limitées d'un commerce local (issues d'OpenStreetMap, donc potentiellement incomplètes) et le produit/service que l'utilisateur souhaite lui vendre.
-Réponds UNIQUEMENT avec un objet JSON valide, sans texte avant ni après, sans balises markdown, au format exact suivant :
+    const systemPrompt = `Tu es un consultant en prospection commerciale B2B pour indépendants et petites agences.
+
+Réponds uniquement avec un objet JSON valide, sans texte supplémentaire, sous ce format exact :
 {
-  "analysis": "2 à 4 phrases sur la présence en ligne probable de ce commerce et son potentiel comme client, en restant honnête sur le fait que les données sont limitées",
-  "improvements": ["3 à 5 suggestions concrètes et courtes pour améliorer la présence en ligne ou l'activité de ce commerce"],
-  "pitch": "Un court argumentaire de vente (6 à 10 phrases, ton direct et concret, à dire en personne ou par téléphone) expliquant pourquoi ce commerce a intérêt à prendre le produit/service de l'utilisateur, adapté à ce type de commerce précis"
+  "analysis": "2 à 4 phrases sur la présence en ligne du commerce et son potentiel comme client",
+  "improvements": ["3 à 5 suggestions concrètes et courtes"],
+  "pitch": "Un argumentaire de vente personnalisé de 6 à 10 phrases"
 }`;
 
-    const userPrompt = `Produit/service à vendre : ${productLabel}\n\nInfos sur le commerce :\n${facts}`;
+    const userPrompt = `Produit ou service à vendre : ${productLabel}
 
-    const resp = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        max_tokens: 900,
-        system: systemPrompt,
-        messages: [{ role: "user", content: userPrompt }],
-      }),
-    });
+Informations sur le commerce :
+${facts}`;
+
+    const resp = await fetch(
+      "https://api.groq.com/openai/v1/chat/completions",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: MODEL,
+          temperature: 0.4,
+          max_completion_tokens: 900,
+          response_format: { type: "json_object" },
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt },
+          ],
+        }),
+      }
+    );
 
     if (!resp.ok) {
-      const errText = await resp.text();
-      console.error("Anthropic API error:", resp.status, errText);
+      const errorText = await resp.text();
+      console.error("Groq API error:", resp.status, errorText);
+
       return json(
-        { error: `Erreur de l'API Claude (${resp.status}). Vérifie la clé API et le crédit disponible.` },
+        {
+          error: `Erreur de l’API Groq (${resp.status}). Vérifie la clé API.`,
+        },
         502
       );
     }
 
     const data = await resp.json();
-    const textBlock = (data.content || []).find((b) => b.type === "text");
-    if (!textBlock) {
+    const content = data.choices?.[0]?.message?.content;
+
+    if (!content) {
       return json({ error: "Réponse IA vide." }, 502);
     }
 
-    const cleaned = textBlock.text.replace(/```json|```/g, "").trim();
     let parsed;
+
     try {
-      parsed = JSON.parse(cleaned);
-    } catch (e) {
-      console.error("JSON parse failed:", cleaned);
-      return json({ error: "Impossible d'interpréter la réponse de l'IA." }, 502);
+      parsed = JSON.parse(content.replace(/```json|```/g, "").trim());
+    } catch {
+      console.error("JSON impossible à lire :", content);
+      return json(
+        { error: "Impossible d’interpréter la réponse de l’IA." },
+        502
+      );
     }
 
     return json({
       analysis: parsed.analysis || "",
-      improvements: Array.isArray(parsed.improvements) ? parsed.improvements : [],
+      improvements: Array.isArray(parsed.improvements)
+        ? parsed.improvements
+        : [],
       pitch: parsed.pitch || "",
     });
-  } catch (err) {
-    console.error(err);
-    return json({ error: "Erreur inattendue pendant l'analyse." }, 500);
+  } catch (error) {
+    console.error(error);
+    return json(
+      { error: "Erreur inattendue pendant l’analyse." },
+      500
+    );
   }
 }
 
