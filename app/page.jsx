@@ -18,6 +18,21 @@ function getPotentialScore(business) {
   return Math.min(score, 100);
 }
 
+function getWhatsAppUrl(phone, message) {
+  if (!phone) return null;
+  let digits = String(phone).replace(/\D/g, "");
+  if (digits.startsWith("00")) digits = digits.slice(2);
+  else if (digits.startsWith("0")) digits = `32${digits.slice(1)}`;
+  if (!digits) return null;
+  return `https://wa.me/${digits}?text=${encodeURIComponent(message)}`;
+}
+
+function getEmailUrl(email, businessName, message) {
+  if (!email) return null;
+  const subject = `Proposition pour ${businessName}`;
+  return `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(message)}`;
+}
+
 export default function Home() {
   const [address, setAddress] = useState("");
   const [radius, setRadius] = useState(2);
@@ -502,9 +517,35 @@ export default function Home() {
                             <div className="template-box" key={label}>
                               <strong>{label}</strong>
                               <p>{message}</p>
-                              <button type="button" onClick={() => navigator.clipboard?.writeText(message)}>
-                                Copier
-                              </button>
+                              <div className="template-actions">
+                                <button type="button" onClick={() => navigator.clipboard?.writeText(message)}>
+                                  Copier
+                                </button>
+                                {label === "WhatsApp" && getWhatsAppUrl(biz.phone, message) && (
+                                  <a
+                                    className="direct-link whatsapp-link"
+                                    href={getWhatsAppUrl(biz.phone, message)}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                  >
+                                    Ouvrir WhatsApp
+                                  </a>
+                                )}
+                                {label === "WhatsApp" && !biz.phone && (
+                                  <span className="missing-contact">Numéro indisponible</span>
+                                )}
+                                {label === "E-mail" && getEmailUrl(biz.email, biz.name, message) && (
+                                  <a
+                                    className="direct-link email-link"
+                                    href={getEmailUrl(biz.email, biz.name, message)}
+                                  >
+                                    Envoyer l’e-mail
+                                  </a>
+                                )}
+                                {label === "E-mail" && !biz.email && (
+                                  <span className="missing-contact">E-mail indisponible</span>
+                                )}
+                              </div>
                             </div>
                           ))}
                         </div>
