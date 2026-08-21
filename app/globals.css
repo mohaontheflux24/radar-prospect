@@ -698,8 +698,7 @@ button {
   margin-top: 16px;
 }
 .template-box {
-  position: relative;
-  padding: 12px 64px 12px 12px;
+  padding: 12px;
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -711,16 +710,37 @@ button {
 .template-box p {
   margin: 6px 0 0;
 }
-.template-box button {
-  position: absolute;
-  top: 9px;
-  right: 9px;
+.template-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+.template-actions button,
+.direct-link {
   color: var(--text-dim);
   background: transparent;
   border: 1px solid var(--border);
   border-radius: 6px;
-  padding: 4px 7px;
+  padding: 6px 9px;
+  font-size: 11px;
   cursor: pointer;
+  text-decoration: none;
+}
+.whatsapp-link {
+  color: #7ef0a1;
+  border-color: rgba(37, 211, 102, 0.45);
+  background: rgba(37, 211, 102, 0.09);
+}
+.email-link {
+  color: var(--cyan);
+  border-color: rgba(94, 234, 212, 0.4);
+  background: rgba(94, 234, 212, 0.08);
+}
+.missing-contact {
+  color: var(--text-dim);
+  font: 10.5px var(--font-mono);
 }
 
 .empty-state {
