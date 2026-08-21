@@ -79,6 +79,7 @@ export async function POST(req) {
         hasWebsite,
         openingHours: tags.opening_hours || null,
         phone: tags.phone || tags["contact:phone"] || null,
+        email: tags.email || tags["contact:email"] || null,
         address: [tags["addr:housenumber"], tags["addr:street"]].filter(Boolean).join(" ") || null,
         website: tags.website || tags["contact:website"] || null,
       });
