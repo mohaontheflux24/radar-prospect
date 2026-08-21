@@ -1,10 +1,12 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import dynamic from "next/dynamic";
 import "leaflet/dist/leaflet.css";
 
 const MapView = dynamic(() => import("./components/MapView"), { ssr: false });
+const STORAGE_KEY = "radar-prospect-leads-v1";
+const LEAD_STATUSES = ["À contacter", "Contacté", "Rendez-vous", "Client", "Refusé"];
 
 export default function Home() {
   const [address, setAddress] = useState("");
@@ -16,6 +18,57 @@ export default function Home() {
   const [businesses, setBusinesses] = useState([]);
   const [analyses, setAnalyses] = useState({}); // id -> { loading, error, data }
   const [activeId, setActiveId] = useState(null);
+  const [savedProspects, setSavedProspects] = useState([]);
+  const [storageReady, setStorageReady] = useState(false);
+  const [showProspects, setShowProspects] = useState(false);
+
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem(STORAGE_KEY);
+      if (stored) setSavedProspects(JSON.parse(stored));
+    } catch (err) {
+      console.error("Impossible de charger les prospects :", err);
+    } finally {
+      setStorageReady(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!storageReady) return;
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(savedProspects));
+  }, [savedProspects, storageReady]);
+
+  const savedIds = useMemo(
+    () => new Set(savedProspects.map((lead) => lead.business.id)),
+    [savedProspects]
+  );
+
+  const saveProspect = useCallback((biz) => {
+    setSavedProspects((current) => {
+      if (current.some((lead) => lead.business.id === biz.id)) return current;
+      return [
+        {
+          id: `${biz.id}-${Date.now()}`,
+          business: biz,
+          status: "À contacter",
+          notes: "",
+          followUpAt: "",
+          savedAt: new Date().toISOString(),
+        },
+        ...current,
+      ];
+    });
+  }, []);
+
+  const updateProspect = useCallback((id, changes) => {
+    setSavedProspects((current) =>
+      current.map((lead) => (lead.id === id ? { ...lead, ...changes } : lead))
+    );
+  }, []);
+
+  const removeProspect = useCallback((id) => {
+    setSavedProspects((current) => current.filter((lead) => lead.id !== id));
+  }, []);
 
   const handleSearch = useCallback(
     async (e) => {
@@ -65,6 +118,11 @@ export default function Home() {
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || "Échec de l'analyse.");
         setAnalyses((prev) => ({ ...prev, [biz.id]: { loading: false, error: "", data } }));
+        setSavedProspects((current) =>
+          current.map((lead) =>
+            lead.business.id === biz.id ? { ...lead, analysis: data } : lead
+          )
+        );
       } catch (err) {
         setAnalyses((prev) => ({
           ...prev,
@@ -82,8 +140,91 @@ export default function Home() {
           <span className="dot" />
           Radar Prospect
         </div>
-        <span className="brand-tag">zone de chasse commerciale</span>
+        <button
+          type="button"
+          className={`prospects-toggle ${showProspects ? "active" : ""}`}
+          onClick={() => setShowProspects((value) => !value)}
+        >
+          Mes prospects <span>{savedProspects.length}</span>
+        </button>
       </div>
+
+      {showProspects && (
+        <section className="crm-panel">
+          <div className="crm-header">
+            <div>
+              <div className="eyebrow">Mini CRM</div>
+              <h2>Mes prospects enregistrés</h2>
+            </div>
+            <button type="button" className="close-crm" onClick={() => setShowProspects(false)}>
+              Fermer
+            </button>
+          </div>
+
+          {savedProspects.length === 0 ? (
+            <div className="empty-state">
+              Aucun prospect enregistré. Lance une recherche puis clique sur « Enregistrer ».
+            </div>
+          ) : (
+            <div className="lead-list">
+              {savedProspects.map((lead) => (
+                <article className="lead-card" key={lead.id}>
+                  <div className="lead-title-row">
+                    <div>
+                      <h3>{lead.business.name}</h3>
+                      <p>{lead.business.category || "Commerce"} · {lead.business.address || "Adresse non renseignée"}</p>
+                    </div>
+                    <button
+                      type="button"
+                      className="delete-lead"
+                      onClick={() => removeProspect(lead.id)}
+                    >
+                      Supprimer
+                    </button>
+                  </div>
+
+                  <div className="lead-contact">
+                    <span>{lead.business.phone || "Téléphone non renseigné"}</span>
+                    {lead.business.website && (
+                      <a href={lead.business.website} target="_blank" rel="noreferrer">Voir le site</a>
+                    )}
+                  </div>
+
+                  <div className="lead-fields">
+                    <label>
+                      Statut
+                      <select
+                        value={lead.status}
+                        onChange={(e) => updateProspect(lead.id, { status: e.target.value })}
+                      >
+                        {LEAD_STATUSES.map((status) => <option key={status}>{status}</option>)}
+                      </select>
+                    </label>
+                    <label>
+                      Date de relance
+                      <input
+                        type="date"
+                        value={lead.followUpAt}
+                        onChange={(e) => updateProspect(lead.id, { followUpAt: e.target.value })}
+                      />
+                    </label>
+                  </div>
+
+                  <label className="notes-field">
+                    Notes personnelles
+                    <textarea
+                      rows="3"
+                      placeholder="Ex. appelé mardi, intéressé par un site vitrine…"
+                      value={lead.notes}
+                      onChange={(e) => updateProspect(lead.id, { notes: e.target.value })}
+                    />
+                  </label>
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
 
       <section className="hero">
         <div>
@@ -192,6 +333,15 @@ export default function Home() {
                   </div>
                   <div className="biz-actions">
                     <button
+                      type="button"
+                      className={`save-btn ${savedIds.has(biz.id) ? "saved" : ""}`}
+                      onClick={() => saveProspect(biz)}
+                      disabled={savedIds.has(biz.id)}
+                    >
+                      {savedIds.has(biz.id) ? "✓ Enregistré" : "+ Enregistrer"}
+                    </button>
+                    <button
+                      type="button"
                       className="btn-secondary"
                       onClick={() => handleAnalyze(biz)}
                       disabled={state?.loading || !product.trim()}
