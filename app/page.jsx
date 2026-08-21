@@ -8,6 +8,16 @@ const MapView = dynamic(() => import("./components/MapView"), { ssr: false });
 const STORAGE_KEY = "radar-prospect-leads-v1";
 const LEAD_STATUSES = ["À contacter", "Contacté", "Rendez-vous", "Client", "Refusé"];
 
+function getPotentialScore(business) {
+  let score = 15;
+  if (!business.hasWebsite) score += 40;
+  if (business.phone) score += 20;
+  if (business.address) score += 10;
+  if (business.openingHours) score += 10;
+  if (business.distanceKm <= 3) score += 5;
+  return Math.min(score, 100);
+}
+
 export default function Home() {
   const [address, setAddress] = useState("");
   const [radius, setRadius] = useState(2);
@@ -21,6 +31,7 @@ export default function Home() {
   const [savedProspects, setSavedProspects] = useState([]);
   const [storageReady, setStorageReady] = useState(false);
   const [showProspects, setShowProspects] = useState(false);
+  const [filters, setFilters] = useState({ noWebsite: false, withPhone: false, hideSaved: false });
 
   useEffect(() => {
     try {
@@ -42,6 +53,56 @@ export default function Home() {
     () => new Set(savedProspects.map((lead) => lead.business.id)),
     [savedProspects]
   );
+
+  const filteredBusinesses = useMemo(() => {
+    return businesses
+      .filter((biz) => !filters.noWebsite || !biz.hasWebsite)
+      .filter((biz) => !filters.withPhone || Boolean(biz.phone))
+      .filter((biz) => !filters.hideSaved || !savedIds.has(biz.id))
+      .sort((a, b) => getPotentialScore(b) - getPotentialScore(a));
+  }, [businesses, filters, savedIds]);
+
+  const crmStats = useMemo(() => {
+    const count = (status) => savedProspects.filter((lead) => lead.status === status).length;
+    const contacted = savedProspects.filter((lead) => lead.status !== "À contacter").length;
+    const clients = count("Client");
+    return {
+      total: savedProspects.length,
+      contacted,
+      appointments: count("Rendez-vous"),
+      clients,
+      conversion: contacted ? Math.round((clients / contacted) * 100) : 0,
+    };
+  }, [savedProspects]);
+
+  const exportProspects = useCallback(() => {
+    const safeCell = (value) => {
+      const text = String(value ?? "").replace(/"/g, '""');
+      const protectedText = /^[=+\-@]/.test(text) ? `'${text}` : text;
+      return `"${protectedText}"`;
+    };
+    const rows = [
+      ["Nom", "Catégorie", "Téléphone", "Adresse", "Site", "Score", "Statut", "Relance", "Notes"],
+      ...savedProspects.map((lead) => [
+        lead.business.name,
+        lead.business.category,
+        lead.business.phone,
+        lead.business.address,
+        lead.business.website,
+        getPotentialScore(lead.business),
+        lead.status,
+        lead.followUpAt,
+        lead.notes,
+      ]),
+    ];
+    const csv = `\uFEFF${rows.map((row) => row.map(safeCell).join(";")).join("\n")}`;
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `radar-prospects-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }, [savedProspects]);
 
   const saveProspect = useCallback((biz) => {
     setSavedProspects((current) => {
@@ -166,7 +227,18 @@ export default function Home() {
               Aucun prospect enregistré. Lance une recherche puis clique sur « Enregistrer ».
             </div>
           ) : (
-            <div className="lead-list">
+            <>
+              <div className="stats-grid">
+                <div><strong>{crmStats.total}</strong><span>Prospects</span></div>
+                <div><strong>{crmStats.contacted}</strong><span>Contactés</span></div>
+                <div><strong>{crmStats.appointments}</strong><span>Rendez-vous</span></div>
+                <div><strong>{crmStats.clients}</strong><span>Clients</span></div>
+                <div><strong>{crmStats.conversion}%</strong><span>Conversion</span></div>
+              </div>
+              <button type="button" className="export-btn" onClick={exportProspects}>
+                Télécharger la liste CSV
+              </button>
+              <div className="lead-list">
               {savedProspects.map((lead) => (
                 <article className="lead-card" key={lead.id}>
                   <div className="lead-title-row">
@@ -221,7 +293,8 @@ export default function Home() {
                   </label>
                 </article>
               ))}
-            </div>
+              </div>
+            </>
           )}
         </section>
       )}
@@ -298,22 +371,54 @@ export default function Home() {
         )}
       </form>
 
+      {businesses.length > 0 && (
+        <div className="filters-bar">
+          <strong>Filtres</strong>
+          <label>
+            <input
+              type="checkbox"
+              checked={filters.noWebsite}
+              onChange={(e) => setFilters((current) => ({ ...current, noWebsite: e.target.checked }))}
+            />
+            Sans site web
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={filters.withPhone}
+              onChange={(e) => setFilters((current) => ({ ...current, withPhone: e.target.checked }))}
+            />
+            Avec téléphone
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={filters.hideSaved}
+              onChange={(e) => setFilters((current) => ({ ...current, hideSaved: e.target.checked }))}
+            />
+            Masquer les enregistrés
+          </label>
+          <span>{filteredBusinesses.length} résultat(s)</span>
+        </div>
+      )}
+
       {center && (
         <div className="results">
           <div className="map-wrap">
             <MapView
               center={center}
               radiusKm={Number(radius)}
-              businesses={businesses}
+              businesses={filteredBusinesses}
               activeId={activeId}
             />
           </div>
           <div className="list-wrap">
-            {businesses.length === 0 && (
+            {filteredBusinesses.length === 0 && (
               <div className="empty-state">Aucun résultat pour l&apos;instant.</div>
             )}
-            {businesses.map((biz) => {
+            {filteredBusinesses.map((biz) => {
               const state = analyses[biz.id];
+              const score = getPotentialScore(biz);
               return (
                 <div
                   key={biz.id}
@@ -323,7 +428,12 @@ export default function Home() {
                 >
                   <div className="biz-head">
                     <span className="biz-name">{biz.name}</span>
-                    <span className="biz-dist">{biz.distanceKm.toFixed(1)} km</span>
+                    <div className="biz-numbers">
+                      <span className={`score score-${score >= 70 ? "high" : score >= 45 ? "mid" : "low"}`}>
+                        Potentiel {score}/100
+                      </span>
+                      <span className="biz-dist">{biz.distanceKm.toFixed(1)} km</span>
+                    </div>
                   </div>
                   <div className="biz-meta">{biz.category || "commerce"}</div>
                   <div className="biz-flags">
@@ -379,6 +489,26 @@ export default function Home() {
                           Copier
                         </button>
                       </div>
+
+                      {state.data.messages && (
+                        <div className="message-templates">
+                          <h4>Messages prêts à envoyer</h4>
+                          {[
+                            ["WhatsApp", state.data.messages.whatsapp],
+                            ["E-mail", state.data.messages.email],
+                            ["Téléphone", state.data.messages.phone],
+                            ["Face-à-face", state.data.messages.inPerson],
+                          ].map(([label, message]) => message && (
+                            <div className="template-box" key={label}>
+                              <strong>{label}</strong>
+                              <p>{message}</p>
+                              <button type="button" onClick={() => navigator.clipboard?.writeText(message)}>
+                                Copier
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
