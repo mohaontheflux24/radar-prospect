@@ -43,7 +43,13 @@ Réponds uniquement avec un objet JSON valide, sans texte supplémentaire, sous 
 {
   "analysis": "2 à 4 phrases sur la présence en ligne du commerce et son potentiel comme client",
   "improvements": ["3 à 5 suggestions concrètes et courtes"],
-  "pitch": "Un argumentaire de vente personnalisé de 6 à 10 phrases"
+  "pitch": "Un argumentaire de vente personnalisé de 6 à 10 phrases",
+  "messages": {
+    "whatsapp": "Un message WhatsApp personnalisé, naturel et court",
+    "email": "Un e-mail professionnel avec objet et corps du message",
+    "phone": "Un script téléphonique court avec introduction, valeur proposée et question finale",
+    "inPerson": "Une présentation courte et naturelle à dire en face-à-face"
+  }
 }`;
 
     const userPrompt = `Produit ou service à vendre : ${productLabel}
@@ -62,7 +68,7 @@ ${facts}`;
         body: JSON.stringify({
           model: MODEL,
           temperature: 0.4,
-          max_completion_tokens: 900,
+          max_completion_tokens: 1500,
           response_format: { type: "json_object" },
           messages: [
             { role: "system", content: systemPrompt },
@@ -109,6 +115,12 @@ ${facts}`;
         ? parsed.improvements
         : [],
       pitch: parsed.pitch || "",
+      messages: {
+        whatsapp: parsed.messages?.whatsapp || "",
+        email: parsed.messages?.email || "",
+        phone: parsed.messages?.phone || "",
+        inPerson: parsed.messages?.inPerson || "",
+      },
     });
   } catch (error) {
     console.error(error);
